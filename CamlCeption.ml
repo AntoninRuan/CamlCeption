@@ -12,6 +12,9 @@ type expr =
     | For of string*expr*expr*expr*expr
     | While of cond*expr*expr
     | End
+    | CartProd of expr array
+    | AccessArrayIndex of expr * expr
+    | Lst of expr list
 and cond =
     | Not of cond
     | And of cond * cond
@@ -21,7 +24,9 @@ and cond =
 and valeur =
     | Ival of int
     | Fonction of {var: string; expression: expr; mutable env: (string * valeur) list}
-    | Environment of (string * valeur) list
+    | Environnement of (string * valeur) list
+    | List of valeur list
+    | Tableau of valeur array
 ;;
 
 let rec lookup str lst = match lst with
@@ -49,6 +54,8 @@ let set_env s l = match s with
     | Fonction(g) -> g.env <- l
     | _ -> ();;
 
+let type_error excepted = failwith ("Type error: " ^ excepted ^ " excepted");;
+
 let rec compute lst ex = match ex with
     | Var v -> lookup v lst
     | Int i -> Ival(i)
@@ -59,46 +66,58 @@ let rec compute lst ex = match ex with
         )
     | Plus(g, d) -> (match (compute lst g, compute lst d) with
         | (Ival(g1), Ival(d1)) -> Ival(g1 + d1)
-        | _, _ -> failwith "mauvais type")
+        | _, _ -> type_error "Plus")
     | Minus(g, d) -> (match (compute lst g, compute lst d) with
         | (Ival(g1), Ival(d1)) -> Ival(g1 - d1)
-        | _, _ -> failwith "mauvais type")
+        | _, _ -> type_error "Minus")
     | Mult(g, d) -> (match (compute lst g, compute lst d) with
         | (Ival(g1), Ival(d1)) -> Ival(g1 * d1)
-        | _, _ -> failwith "mauvais type")
+        | _, _ -> type_error "Mult")
     | Div(g, d) -> (match (compute lst g, compute lst d) with
         | (Ival(g1), Ival(d1)) -> if d1 = 0 then (failwith "Division par zero") else Ival(g1 / d1)
-        | _, _ -> failwith "mauvais type")
+        | _, _ -> type_error "Div")
     | Fun(s, e) ->  Fonction{var=s; expression=e; env=lst}
     | App(f, e) -> (match (compute lst f) with
         | Fonction(f) -> compute ((f.var, (compute lst e))::f.env) f.expression
-        | _ -> failwith "mauvais type")
+        | _ -> type_error "Fonction")
     | For(str, debut, fin, e, suite) -> (match (compute lst debut, compute lst fin) with
         | (Ival(debut), Ival(fin)) -> let env = ref lst in if debut <= fin then (
                 for i = debut to fin do
                     (match compute (add_to_env (str, Ival(i)) !env) e with
-                        | Environment(envl) -> env := envl
-                        | _ -> failwith "mauvais type"
+                        | Environnement(envl) -> env := envl
+                        | _ -> type_error "Environnement"
                     )
                 done;
             ) else (
                 for i = debut downto fin do
                     (match compute (add_to_env (str, Ival(i)) !env) e with
-                        | Environment(envl) -> env := envl
-                        | _ -> failwith "mauvais type"
+                        | Environnement(envl) -> env := envl
+                        | _ -> type_error "Environnement"
                     )
                 done;
             );
             compute !env suite
-        | _ -> failwith "mauvais type" )
+        | _ -> type_error "Ival * Ival" )
     | While(cond, e, suite) -> let env = ref lst in while (compute_bool !env cond) do
         (match compute !env e with
-            | Environment(envl) -> env := envl
-            | _ -> failwith "mauvais type"
+            | Environnement(envl) -> env := envl
+            | _ -> type_error "Environnement"
         );
         done;
         compute !env suite
-    | End -> Environment(lst)
+    | End -> Environnement(lst)
+    | CartProd(arr) -> let res = Array.make (Array.length arr) (Ival(0)) in for i = 0 to (Array.length arr - 1) do
+        res.(i) <- compute lst arr.(i)
+        done;
+        Tableau(res)
+    | AccessArrayIndex(tab, ind) -> (match (compute lst tab, compute lst ind) with
+        | Tableau(arr), Ival(i) -> arr.(i)
+        | _ -> type_error "Tableau * Ival"
+        )
+    | Lst(li) -> let rec aux elst = (match elst with
+        | [] -> []
+        | exp::q -> (compute lst exp)::(aux q)
+        ) in List(aux li)
 and compute_bool lst co = match co with
     | Not c -> not (compute_bool lst c)
     | And (c1, c2) -> (compute_bool lst c1) && (compute_bool lst c2)
@@ -158,5 +177,7 @@ let test_while =
      );;
 
 compute [] test_while;;
+
+
 
 
